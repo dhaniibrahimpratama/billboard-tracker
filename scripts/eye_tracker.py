@@ -1,0 +1,167 @@
+"""Module for eye tracking using MediaPipe."""
+
+from datetime import datetime
+import cv2
+import mediapipe as mp
+import numpy as np
+
+# ─────────────────────────────────────────────
+# KONFIGURASI
+# ─────────────────────────────────────────────
+
+# Index landmark MediaPipe FaceMesh (dari 468 titik)
+LEFT_IRIS   = [474, 475, 476, 477]
+RIGHT_IRIS  = [469, 470, 471, 472]
+
+# format: [kiri, kanan, atas-luar, bawah-luar, atas-dalam, bawah-dalam]
+LEFT_EYE    = [362, 263, 387, 380, 373, 385]
+RIGHT_EYE   = [33,  133, 160, 144, 158, 153]
+
+LOOKING_THRESHOLD = 0.25   # makin kecil = makin ketat
+EAR_THRESHOLD     = 0.20   # eye aspect ratio minimum
+
+class EyeTracker:
+    """Tracker for detecting gaze direction using MediaPipe FaceMesh."""
+    def __init__(self):
+        print("[INFO] Loading MediaPipe FaceMesh...")
+        self.mp_face   = mp.solutions.face_mesh
+        self.mp_draw   = mp.solutions.drawing_utils
+
+        # pylint: disable=no-member
+        self.face_mesh = self.mp_face.FaceMesh(
+            max_num_faces        = 10,
+            refine_landmarks     = True,
+            min_detection_confidence = 0.5,
+            min_tracking_confidence  = 0.5,
+        )
+
+    def _landmark_point(self, landmarks, idx, w, h):
+        lm = landmarks[idx]
+        return int(lm.x * w), int(lm.y * h)
+
+    def _eye_aspect_ratio(self, landmarks, eye_indices, w, h):
+        pts = [self._landmark_point(landmarks, i, w, h) for i in eye_indices]
+        v1 = np.linalg.norm(np.array(pts[2]) - np.array(pts[3]))
+        v2 = np.linalg.norm(np.array(pts[4]) - np.array(pts[5]))
+        hz = np.linalg.norm(np.array(pts[0]) - np.array(pts[1]))
+        if hz == 0:
+            return 0
+        return (v1 + v2) / (2.0 * hz)
+
+    def _iris_offset(self, landmarks, iris_indices, eye_indices, w, h):
+        iris_pts = [self._landmark_point(landmarks, i, w, h)
+                    for i in iris_indices]
+        eye_pts  = [self._landmark_point(landmarks, i, w, h)
+                    for i in eye_indices]
+
+        iris_center = np.mean(iris_pts, axis=0)
+        eye_left    = np.array(eye_pts[0])
+        eye_right   = np.array(eye_pts[1])
+        eye_center  = (eye_left + eye_right) / 2.0
+        eye_width   = np.linalg.norm(eye_right - eye_left)
+
+        if eye_width == 0:
+            return 0, 0
+
+        offset_x = (iris_center[0] - eye_center[0]) / eye_width
+        offset_y = (iris_center[1] - eye_center[1]) / eye_width
+        return float(offset_x), float(offset_y)
+
+    def process_frame(self, frame):
+        """Terima 1 frame, deteksi semua wajah dan arah pandangan."""
+        h, w = frame.shape[:2]
+        rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(rgb)
+
+        faces_data = []
+
+        if not results.multi_face_landmarks:
+            return frame, faces_data
+
+        for face_landmarks in results.multi_face_landmarks:
+            lms = face_landmarks.landmark
+
+            ear_l = self._eye_aspect_ratio(lms, LEFT_EYE,  w, h)
+            ear_r = self._eye_aspect_ratio(lms, RIGHT_EYE, w, h)
+            eyes_open = (ear_l > EAR_THRESHOLD) and (ear_r > EAR_THRESHOLD)
+
+            lox, loy = self._iris_offset(lms, LEFT_IRIS,  LEFT_EYE,  w, h)
+            rox, roy = self._iris_offset(lms, RIGHT_IRIS, RIGHT_EYE, w, h)
+
+            avg_ox = (abs(lox) + abs(rox)) / 2.0
+            avg_oy = (abs(loy) + abs(roy)) / 2.0
+
+            looking = (
+                eyes_open
+                and avg_ox < LOOKING_THRESHOLD
+                and avg_oy < LOOKING_THRESHOLD
+            )
+
+            xs = [int(lm.x * w) for lm in lms]
+            ys = [int(lm.y * h) for lm in lms]
+            x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+
+            faces_data.append({
+                "looking"      : looking,
+                "face_box"     : (x1, y1, x2, y2),
+                "left_offset"  : (lox, loy),
+                "right_offset" : (rox, roy),
+                "ear_left"     : ear_l,
+                "ear_right"    : ear_r,
+            })
+
+            color  = (0, 255, 0) if looking else (0, 0, 255)
+            label  = "LIHAT" if looking else "tidak lihat"
+
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, label, (x1, y1 - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+
+            for idx in LEFT_IRIS:
+                px, py = self._landmark_point(lms, idx, w, h)
+                cv2.circle(frame, (px, py), 2, (255, 200, 0), -1)
+
+            for idx in RIGHT_IRIS:
+                px, py = self._landmark_point(lms, idx, w, h)
+                cv2.circle(frame, (px, py), 2, (255, 200, 0), -1)
+
+            cv2.putText(
+                frame,
+                f"ox:{avg_ox:.2f} oy:{avg_oy:.2f}  EAR:{(ear_l+ear_r)/2:.2f}",
+                (x1, y2 + 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1,
+            )
+
+        return frame, faces_data
+
+if __name__ == "__main__":
+    import sys
+    tracker = EyeTracker()
+    SOURCE = 0
+
+    cap = cv2.VideoCapture(SOURCE)
+    if not cap.isOpened():
+        print("[ERROR] Tidak bisa membuka sumber video.")
+        sys.exit(1)
+
+    print("[INFO] Tekan 'Q' untuk keluar.")
+    print("[INFO] Kotak HIJAU = lagi lihat kamera | Kotak MERAH = tidak lihat")
+
+    while True:
+        ret, current_frame = cap.read()
+        if not ret:
+            break
+
+        current_frame, current_faces = tracker.process_frame(current_frame)
+
+        for i, face in enumerate(current_faces):
+            if face["looking"]:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] "
+                      f"Wajah #{i+1} terdeteksi LIHAT ke kamera")
+
+        cv2.imshow("Eye Tracker — tekan Q untuk keluar", current_frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
