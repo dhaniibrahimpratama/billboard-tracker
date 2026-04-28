@@ -11,6 +11,7 @@ from ultralytics import YOLO
 # ─────────────────────────────────────────────
 if getattr(sys, 'frozen', False):
     # Packaged mode with PyInstaller
+    # pylint: disable=protected-access
     MODEL_PATH = os.path.join(sys._MEIPASS, "yolov8n.pt")
 else:
     # Dev mode

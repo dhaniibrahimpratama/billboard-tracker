@@ -4,14 +4,15 @@ import base64
 import json
 import multiprocessing as mp
 from multiprocessing import shared_memory
-import numpy as np
-import cv2
 import os
 import time
 import sys
 import signal
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import numpy as np
+import cv2
 import pandas as pd
 
 # ==========================================
@@ -20,6 +21,7 @@ import pandas as pd
 
 # Path Detection untuk PyInstaller (.exe)
 if getattr(sys, 'frozen', False):
+    # pylint: disable=protected-access
     BASE_DIR = Path(sys._MEIPASS)
     EXE_DIR = Path(os.path.dirname(sys.executable))
     OUTPUT_DIR = EXE_DIR / "output"
@@ -41,6 +43,8 @@ SHM_NAMES_OUT = [f"shm_cam_out_{i}" for i in range(SHM_SLOTS)] # Processed frame
 
 COOLDOWN_MINUTES  = 5     
 INTERVAL_MINUTES  = 10    
+
+exit_event_global = None
 
 
 # ==========================================
@@ -122,7 +126,7 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, source=0):
     else:
         cap = cv2.VideoCapture(source, backend)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        devnull = open(os.devnull, 'w')
+        devnull = open(os.devnull, 'w', encoding='utf-8')
         os.dup2(devnull.fileno(), sys.stderr.fileno())
 
     shm_blocks = [shared_memory.SharedMemory(name=name) for name in SHM_NAMES_IN]
@@ -249,9 +253,10 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
 # ==========================================
 # 6. MAIN THREAD & GRACEFUL SHUTDOWN
 # ==========================================
+# pylint: disable=unused-argument
 def shutdown_handler(signum, frame):
-    global exit_event_global
-    if 'exit_event_global' in globals():
+    """Callback for OS termination signals."""
+    if exit_event_global is not None:
         exit_event_global.set()
 
 def main():
@@ -348,7 +353,7 @@ def main():
             if dt < frame_interval:
                 time.sleep(frame_interval - dt)
                 
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-exception-caught
         send({"type": "error", "message": str(e)})
         exit_event_global.set()
     
@@ -363,7 +368,7 @@ def main():
             shm.close()
             try:
                 shm.unlink()
-            except Exception: pass 
+            except Exception: pass # pylint: disable=broad-exception-caught
             
         sys.exit(0)
 

@@ -24,6 +24,7 @@ class EyeTracker:
     """Tracker for detecting gaze direction using MediaPipe FaceMesh."""
     def __init__(self):
         print("[INFO] Loading MediaPipe FaceMesh...")
+        # pylint: disable=no-member
         self.mp_face   = mp.solutions.face_mesh
         self.mp_draw   = mp.solutions.drawing_utils
 
