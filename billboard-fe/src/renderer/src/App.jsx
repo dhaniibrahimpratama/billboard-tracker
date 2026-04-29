@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 
 function App() {
   const [status, setStatus] = useState('IDLE') // IDLE, RUNNING, ERROR
-  const [message, setMessage] = useState('Sistem siap.')
+  const [sourceName, setSourceName] = useState('')
   const [frameData, setFrameData] = useState(null)
   
   const [stats, setStats] = useState({
@@ -13,8 +13,7 @@ function App() {
     flush_in_seconds: 600
   })
 
-  const [logs, setLogs] = useState([])
-  const logsEndRef = useRef(null)
+  const [csvLogs, setCsvLogs] = useState([])
 
   useEffect(() => {
     // Listen to IPC messages from main process
@@ -23,24 +22,25 @@ function App() {
 
       if (msg.type === 'ready') {
         setStatus('RUNNING')
-        setMessage('Model aktif. Menganalisis...')
-        addLog('INFO', 'AI Backend berjalan.')
       } else if (msg.type === 'frame') {
         setFrameData(`data:image/jpeg;base64,${msg.data}`)
       } else if (msg.type === 'stats') {
         setStats(msg)
       } else if (msg.type === 'csv_row') {
-        addLog('CSV', `Data terekam: ${msg.people_passing} lewat, ${msg.people_watching} lihat`)
+        setCsvLogs(prev => [
+          {
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            passing: msg.people_passing,
+            watching: msg.people_watching
+          },
+          ...prev
+        ].slice(0, 50)) // Keep last 50 logs
       } else if (msg.type === 'done') {
         setStatus('IDLE')
-        setMessage(msg.message || 'Selesai.')
-        addLog('INFO', 'Video stream selesai.')
+        setFrameData(null)
       } else if (msg.type === 'error') {
         setStatus('ERROR')
-        setMessage('Terjadi kesalahan!')
-        addLog('ERROR', msg.message)
-      } else if (msg.type === 'info') {
-        addLog('INFO', msg.message)
+        setFrameData(null)
       }
     })
 
@@ -51,20 +51,11 @@ function App() {
     }
   }, [])
 
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
-
-  const addLog = (type, text) => {
-    const time = new Date().toLocaleTimeString()
-    setLogs(prev => [...prev.slice(-49), `[${time}] [${type}] ${text}`])
-  }
-
   const startWebcam = async () => {
     setStatus('RUNNING')
-    setMessage('Memulai kamera...')
+    setSourceName('Kamera (Webcam)')
     setFrameData(null)
-    setLogs([])
+    setCsvLogs([])
     await window.api.startPython(0)
   }
 
@@ -72,9 +63,9 @@ function App() {
     const file = event.target.files[0]
     if (file) {
       setStatus('RUNNING')
-      setMessage(`Memutar video: ${file.name}`)
+      setSourceName(file.name)
       setFrameData(null)
-      setLogs([])
+      setCsvLogs([])
       await window.api.startPython(file.path)
     }
   }
@@ -82,7 +73,6 @@ function App() {
   const stopTracker = async () => {
     await window.api.stopPython()
     setStatus('IDLE')
-    setMessage('Dihentikan.')
     setFrameData(null)
   }
 
@@ -92,94 +82,143 @@ function App() {
     return `${m}:${s}`
   }
 
+  // Calculate percentage (600 seconds = 10 minutes max)
+  const progressPercent = Math.min(100, Math.max(0, (stats.flush_in_seconds / 600) * 100))
+
   return (
     <div className="app-container">
       <header>
-        <h1>Billboard AI Tracker</h1>
-        <div className={`status-badge ${status.toLowerCase()}`}>
-          <div className="status-indicator"></div>
-          {status === 'RUNNING' ? 'Aktif' : status === 'ERROR' ? 'Error' : 'Standby'}
+        <div className="brand">
+          <span>Billboard</span> Eye Tracker
+        </div>
+        <div className="header-actions">
+          <button 
+            className="btn btn-webcam" 
+            onClick={startWebcam}
+            disabled={status === 'RUNNING'}
+            style={{ opacity: status === 'RUNNING' ? 0.5 : 1 }}
+          >
+            ▶ Live Webcam
+          </button>
+          
+          <label 
+            className="btn btn-upload"
+            style={{ opacity: status === 'RUNNING' ? 0.5 : 1, cursor: status === 'RUNNING' ? 'default' : 'pointer' }}
+          >
+            ↑ Upload Video
+            <input 
+              type="file" 
+              accept="video/mp4,video/avi,video/mkv" 
+              onChange={handleFileUpload}
+              disabled={status === 'RUNNING'}
+            />
+          </label>
+
+          {status === 'RUNNING' && (
+            <button className="btn btn-stop" onClick={stopTracker}>
+              ■ Stop
+            </button>
+          )}
         </div>
       </header>
 
       <div className="main-content">
         <section className="video-section">
-          <div className="glass-card">
-            <div className="controls">
-              <button 
-                className="btn btn-primary" 
-                onClick={startWebcam}
-                disabled={status === 'RUNNING'}
-              >
-                ▶ Live Webcam
-              </button>
-              
-              <label className={`btn btn-secondary ${status === 'RUNNING' ? 'disabled' : ''}`}>
-                📁 Upload Video
-                <input 
-                  type="file" 
-                  accept="video/mp4,video/avi,video/mkv" 
-                  onChange={handleFileUpload}
-                  disabled={status === 'RUNNING'}
-                />
-              </label>
-
-              {status === 'RUNNING' && (
-                <button className="btn btn-danger" onClick={stopTracker}>
-                  ■ Hentikan
-                </button>
-              )}
-            </div>
-          </div>
-
           <div className="video-feed">
             {frameData ? (
               <img src={frameData} alt="AI Camera Feed" />
             ) : (
               <div className="video-placeholder">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 7l-7 5 7 5V7z"></path>
-                  <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect>
+                  <polyline points="17 2 12 7 7 2"></polyline>
                 </svg>
-                <span>{message}</span>
+                <span>Pilih mode Live Webcam atau Upload Video</span>
               </div>
             )}
           </div>
         </section>
 
-        <section className="dashboard-section">
-          <div className="glass-card">
-            <h2 style={{marginTop: 0, fontSize: '1.2rem', fontWeight: 600}}>Statistik Realtime</h2>
-            <p style={{fontSize: '0.85rem', color: 'var(--text-muted)'}}>
-              Data akan direkam ke CSV dalam <strong>{formatTime(stats.flush_in_seconds)}</strong>
-            </p>
-            
+        <section className="sidebar">
+          
+          <div className="status-wrapper">
+            <div className="section-title">STATUS</div>
+            <div className="status-badge">
+              <div className={`status-indicator ${status.toLowerCase()}`}></div>
+              {status === 'RUNNING' ? 'Berjalan' : status === 'ERROR' ? 'Error' : 'Dihentikan'}
+            </div>
+            {sourceName && (
+              <div className="source-text">Sumber: {sourceName}</div>
+            )}
+          </div>
+
+          <div className="stats-wrapper">
+            <div className="section-title">STATISTIK INTERVAL INI</div>
             <div className="stats-grid">
               <div className="stat-box">
-                <span className="stat-label">Di Frame Saat Ini</span>
-                <span className="stat-value">{stats.active_people}</span>
+                <span className="stat-value cyan">{stats.active_people}</span>
+                <span className="stat-label">Di frame</span>
               </div>
               <div className="stat-box">
-                <span className="stat-label">Melihat Kamera</span>
-                <span className="stat-value stat-highlight">{stats.watching_now}</span>
+                <span className="stat-value yellow">{stats.people_passing}</span>
+                <span className="stat-label">Total lewat</span>
               </div>
               <div className="stat-box">
-                <span className="stat-label">Total Lewat (Sesi)</span>
-                <span className="stat-value">{stats.people_passing}</span>
+                <span className="stat-value green">{stats.watching_now}</span>
+                <span className="stat-label">Lihat sekarang</span>
               </div>
               <div className="stat-box">
-                <span className="stat-label">Total Melihat (Sesi)</span>
-                <span className="stat-value stat-highlight">{stats.people_watching}</span>
+                <span className="stat-value green">{stats.people_watching}</span>
+                <span className="stat-label">Total lihat</span>
               </div>
-            </div>
-
-            <div className="log-container">
-              {logs.map((log, i) => (
-                <div key={i} className="log-entry">{log}</div>
-              ))}
-              <div ref={logsEndRef} />
             </div>
           </div>
+
+          <div className="progress-container">
+            <div className="progress-header">
+              <div className="section-title" style={{margin: 0}}>FLUSH CSV DALAM</div>
+              <div className="progress-time">{formatTime(stats.flush_in_seconds)}</div>
+            </div>
+            <div className="progress-track">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${progressPercent}%` }}
+              ></div>
+            </div>
+          </div>
+
+          <div className="log-section">
+            <div className="section-title">LOG CSV</div>
+            <div className="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Waktu</th>
+                    <th>Lewat</th>
+                    <th>Lihat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan="3">
+                        <div className="empty-table">Belum ada data</div>
+                      </td>
+                    </tr>
+                  ) : (
+                    csvLogs.map((log, i) => (
+                      <tr key={i}>
+                        <td>{log.time}</td>
+                        <td>{log.passing}</td>
+                        <td>{log.watching}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
         </section>
       </div>
     </div>

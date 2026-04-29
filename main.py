@@ -115,52 +115,79 @@ class CSVLogger:
 # ==========================================
 # 4. PRODUCER: CAMERA I/O PROCESS
 # ==========================================
-def camera_producer(exit_event, latest_in_idx, frame_ready_event, source=0):
+def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event, source=0):
     # Hijack signal, Worker mati patuh pada 'exit_event' bapaknya.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
     backend = cv2.CAP_DSHOW if sys.platform == 'win32' else cv2.CAP_V4L2
     if isinstance(source, str):
-        cap = cv2.VideoCapture(source)
+        source = str(source).strip('"').strip("'").replace('\\', '/')
+        cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
     else:
         cap = cv2.VideoCapture(source, backend)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         devnull = open(os.devnull, 'w', encoding='utf-8')
         os.dup2(devnull.fileno(), sys.stderr.fileno())
 
-    shm_blocks = [shared_memory.SharedMemory(name=name) for name in SHM_NAMES_IN]
-    slot_idx = 0
-
     try:
+        if not cap.isOpened():
+            print(json.dumps({"type": "error", "message": f"Tidak bisa membuka sumber video: {source}"}), flush=True)
+            return
+
+        shm_blocks = [shared_memory.SharedMemory(name=name) for name in SHM_NAMES_IN]
+        slot_idx = 0
+
+        # Tunggu AI siap sebelum mulai memutar video (agar video pendek tidak terlewat)
+        while not ai_ready_event.is_set() and not exit_event.is_set():
+            time.sleep(0.1)
+
+        frame_count = 0
         while not exit_event.is_set():
+            if hasattr(mp, 'parent_process'):
+                parent = mp.parent_process()
+                if parent is not None and not parent.is_alive():
+                    break
+            
             ret, frame = cap.read()
             if not ret:
-                # File habis -> break. Webcam -> continue.
-                if isinstance(source, str): break 
+                if isinstance(source, str):
+                    break 
                 continue
+            
+            frame_count += 1
             
             if frame.shape != FRAME_SHAPE:
                 frame = cv2.resize(frame, (FRAME_W, FRAME_H))
 
-            shm = shm_blocks[slot_idx]
-            dst_array = np.ndarray(FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm.buf)
-            np.copyto(dst_array, frame)
-
+            shm_in = shm_blocks[slot_idx]
+            dst = np.ndarray(FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm_in.buf)
+            np.copyto(dst, frame)
+            
             with latest_in_idx.get_lock():
                 latest_in_idx.value = slot_idx
             
             frame_ready_event.set()
+            
             slot_idx = (slot_idx + 1) % SHM_SLOTS
-
+            
+            if isinstance(source, str):
+                time.sleep(1/30)
+    except Exception as e:
+        err_msg = f"[Camera Producer Crash]: {repr(e)}"
+        print(json.dumps({"type": "error", "message": err_msg}), flush=True)
+        sys.stderr.write(err_msg + "\n")
+        sys.stderr.flush()
     finally:
-        cap.release()
-        for shm in shm_blocks: shm.close() 
+        if 'shm_blocks' in locals():
+            for shm in shm_blocks: shm.close()
+        if 'cap' in locals():
+            cap.release()
 
 # ==========================================
 # 5. CONSUMER: AI WORKER PROCESS
 # ==========================================
-def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_event, result_queue):
+def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
@@ -172,6 +199,9 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
     cooldown = CooldownTracker()
     logger   = CSVLogger()
 
+    # Beri tahu produser bahwa model sudah diload dan siap
+    ai_ready_event.set()
+
     interval_start    = datetime.now()
     interval_passing  = 0
     interval_watching = 0
@@ -182,6 +212,11 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
     
     try:
         while not exit_event.is_set():
+            if hasattr(mp, 'parent_process'):
+                parent = mp.parent_process()
+                if parent is not None and not parent.is_alive():
+                    break
+
             if not frame_ready_event.wait(timeout=0.1):
                 continue
             
@@ -297,8 +332,10 @@ def main():
     shm_blocks_out = allocate_shm(SHM_NAMES_OUT)
     shm_blocks_all.extend(shm_blocks_in + shm_blocks_out)
 
-    producer_process = mp.Process(target=camera_producer, args=(exit_event_global, latest_in_idx, frame_ready_event, source))
-    ai_process       = mp.Process(target=ai_worker_process, args=(exit_event_global, latest_in_idx, latest_out_idx, frame_ready_event, result_queue))
+    ai_ready_event = mp.Event()
+
+    producer_process = mp.Process(target=camera_producer, args=(exit_event_global, latest_in_idx, frame_ready_event, ai_ready_event, source))
+    ai_process       = mp.Process(target=ai_worker_process, args=(exit_event_global, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event))
     
     producer_process.start()
     ai_process.start()

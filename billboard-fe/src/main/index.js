@@ -42,7 +42,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('start-python', (event, source) => {
     if (pyProcess) {
-      pyProcess.kill()
+      try { pyProcess.kill() } catch (e) {}
       pyProcess = null
     }
 
@@ -66,8 +66,11 @@ app.whenReady().then(() => {
 
     pyProcess = spawn(command, args, { cwd: cwd })
 
+    let dataBuffer = '';
     pyProcess.stdout.on('data', (data) => {
-      const lines = data.toString().split('\n')
+      dataBuffer += data.toString();
+      const lines = dataBuffer.split('\n');
+      dataBuffer = lines.pop(); // keep incomplete line
       lines.forEach(line => {
         if (!line.trim()) return;
         try {
@@ -83,9 +86,12 @@ app.whenReady().then(() => {
       console.error(`[Python Error]: ${data.toString()}`)
     })
 
+    const currentProcess = pyProcess;
     pyProcess.on('close', (code) => {
-      console.log(`Python process exited with code ${code}`)
-      BrowserWindow.getAllWindows()[0]?.webContents.send('python-message', { type: 'done', message: `Process exited (${code})` })
+      if (pyProcess === currentProcess) {
+        console.log(`Python process exited with code ${code}`)
+        BrowserWindow.getAllWindows()[0]?.webContents.send('python-message', { type: 'done', message: `Process exited (${code})` })
+      }
     })
 
     return true
@@ -93,7 +99,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('stop-python', () => {
     if (pyProcess) {
-      pyProcess.kill()
+      try { pyProcess.kill() } catch (e) {}
       pyProcess = null
     }
     return true
