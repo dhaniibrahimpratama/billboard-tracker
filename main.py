@@ -140,6 +140,10 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event
 
         # Tunggu AI siap sebelum mulai memutar video (agar video pendek tidak terlewat)
         while not ai_ready_event.is_set() and not exit_event.is_set():
+            if hasattr(mp, 'parent_process'):
+                parent = mp.parent_process()
+                if parent is not None and not parent.is_alive():
+                    return
             time.sleep(0.1)
 
         frame_count = 0
@@ -188,29 +192,29 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event
 # 5. CONSUMER: AI WORKER PROCESS
 # ==========================================
 def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event):
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-    from scripts.people_counter import PeopleCounter
-    from scripts.eye_tracker import EyeTracker
-    
-    counter  = PeopleCounter()
-    tracker  = EyeTracker()
-    cooldown = CooldownTracker()
-    logger   = CSVLogger()
-
-    # Beri tahu produser bahwa model sudah diload dan siap
-    ai_ready_event.set()
-
-    interval_start    = datetime.now()
     interval_passing  = 0
     interval_watching = 0
-
-    known_shms_in = {name: shared_memory.SharedMemory(name=name) for name in SHM_NAMES_IN}
-    known_shms_out = {name: shared_memory.SharedMemory(name=name) for name in SHM_NAMES_OUT}
-    out_slot_idx = 0
-    
     try:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+        from scripts.people_counter import PeopleCounter
+        from scripts.eye_tracker import EyeTracker
+        
+        counter  = PeopleCounter()
+        tracker  = EyeTracker()
+        cooldown = CooldownTracker()
+        logger   = CSVLogger()
+
+        # Beri tahu produser bahwa model sudah diload dan siap
+        ai_ready_event.set()
+
+        interval_start    = datetime.now()
+
+        known_shms_in = {name: shared_memory.SharedMemory(name=name) for name in SHM_NAMES_IN}
+        known_shms_out = {name: shared_memory.SharedMemory(name=name) for name in SHM_NAMES_OUT}
+        out_slot_idx = 0
+    
         while not exit_event.is_set():
             if hasattr(mp, 'parent_process'):
                 parent = mp.parent_process()
@@ -279,10 +283,18 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
             })
             out_slot_idx = (out_slot_idx + 1) % SHM_SLOTS
             
+    except Exception as e:
+        err_msg = f"[AI Worker Crash]: {repr(e)}"
+        print(json.dumps({"type": "error", "message": err_msg}), flush=True)
+        sys.stderr.write(err_msg + "\n")
+        sys.stderr.flush()
     finally:
-        logger.log(interval_passing, interval_watching)
-        for shm in known_shms_in.values(): shm.close()
-        for shm in known_shms_out.values(): shm.close()
+        if 'logger' in locals():
+            logger.log(interval_passing, interval_watching)
+        if 'known_shms_in' in locals():
+            for shm in known_shms_in.values(): shm.close()
+        if 'known_shms_out' in locals():
+            for shm in known_shms_out.values(): shm.close()
 
 
 # ==========================================
@@ -410,4 +422,5 @@ def main():
         sys.exit(0)
 
 if __name__ == "__main__":
+    mp.freeze_support()
     main()

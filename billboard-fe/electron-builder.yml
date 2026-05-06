@@ -1,0 +1,11 @@
+appId: com.electron.billboardtracker
+productName: Billboard Eye Tracker
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: resources/billboard_backend
+    to: billboard_backend

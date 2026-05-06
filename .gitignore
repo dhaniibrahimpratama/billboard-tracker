@@ -4,3 +4,8 @@ __pycache__/
 output/
 test_cam.py
 setup_env.sh
+
+# PyInstaller & Build artifacts
+build/
+*.spec
+billboard-fe/resources/
