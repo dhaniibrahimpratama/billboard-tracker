@@ -35,14 +35,12 @@ FRAME_W, FRAME_H, FRAME_C = 640, 480, 3
 FRAME_SHAPE = (FRAME_H, FRAME_W, FRAME_C)
 FRAME_DTYPE = np.uint8
 FRAME_SIZE = int(np.prod(FRAME_SHAPE)) * np.dtype(FRAME_DTYPE).itemsize
-
-# Ring Buffer Ganda
-SHM_SLOTS = 2 
+SHM_SLOTS = 2
 SHM_NAMES_IN = [f"shm_cam_in_{i}" for i in range(SHM_SLOTS)]   # Untreated raw frame
 SHM_NAMES_OUT = [f"shm_cam_out_{i}" for i in range(SHM_SLOTS)] # Processed frame w/ bbox
 
-COOLDOWN_MINUTES  = 5     
-INTERVAL_MINUTES  = 10    
+COOLDOWN_MINUTES  = 5
+INTERVAL_MINUTES = 10
 
 exit_event_global = None
 
@@ -71,7 +69,7 @@ class CooldownTracker:
     def __init__(self, cooldown_minutes=COOLDOWN_MINUTES):
         self.cooldown    = timedelta(minutes=cooldown_minutes)
         self.last_seen   = {}   
-        self.total_watch = 0    
+        self.total_watch = 0
 
     def check_and_register(self, track_id):
         now = datetime.now()
@@ -93,30 +91,58 @@ class CooldownTracker:
 
 class CSVLogger:
     def __init__(self):
-        timestamp  = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.path  = OUTPUT_DIR / f"billboard_{timestamp}.csv"
-        self.rows  = []
-        pd.DataFrame(columns=[
-            "timestamp", "people_passing", "people_watching"
-        ]).to_csv(self.path, index=False)
+        filename = datetime.now().strftime("%Y%m%d")
+        self.path  = OUTPUT_DIR / f"billboard_{filename}.csv"
+        
+        if not self.path.exists():
+            pd.DataFrame(columns=[
+                "Waktu_Sesi", "Orang_Lewat", "Orang_Lihat"
+            ]).to_csv(self.path, index=False)
+            
         send({"type": "info", "message": f"CSV output: {self.path}"})
 
-    def log(self, people_passing, people_watching):
-        row = {
-            "timestamp"       : datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "people_passing"  : people_passing,
-            "people_watching" : people_watching,
-        }
-        self.rows.append(row)
-        pd.DataFrame([row]).to_csv(self.path, mode="a", header=False, index=False)
-        return row
+    def log(self, interval_start, interval_end, people_passing, people_watching):
+        try:
+            df = pd.read_csv(self.path)
+
+            df = df[df["Waktu_Sesi"] != "TOTAL"]
+            
+            row = {
+                "Waktu_Sesi"  : f"{interval_start.strftime('%Y-%m-%d %H:%M:%S')} - {interval_end.strftime('%H:%M:%S')}",
+                "Orang_Lewat" : people_passing,
+                "Orang_Lihat" : people_watching,
+            }
+            
+            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+            
+            total_passing = df["Orang_Lewat"].astype(int).sum()
+            total_watching = df["Orang_Lihat"].astype(int).sum()
+            
+            total_row = {
+                "Waktu_Sesi"  : "TOTAL",
+                "Orang_Lewat" : total_passing,
+                "Orang_Lihat" : total_watching,
+            }
+            
+            df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+            df.to_csv(self.path, index=False)
+            
+            ipc_row = {
+                "timestamp"       : row["Waktu_Sesi"],
+                "people_passing"  : row["Orang_Lewat"],
+                "people_watching" : row["Orang_Lihat"]
+            }
+            return ipc_row
+            
+        except Exception as e: # pylint: disable=broad-exception-caught
+            send({"type": "error", "message": f"[CSVLogger Error]: {repr(e)}"})
+            return {"timestamp": "Error", "people_passing": 0, "people_watching": 0}
 
 
 # ==========================================
 # 4. PRODUCER: CAMERA I/O PROCESS
 # ==========================================
 def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event, source=0):
-    # Hijack signal, Worker mati patuh pada 'exit_event' bapaknya.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 
@@ -138,7 +164,6 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event
         shm_blocks = [shared_memory.SharedMemory(name=name) for name in SHM_NAMES_IN]
         slot_idx = 0
 
-        # Tunggu AI siap sebelum mulai memutar video (agar video pendek tidak terlewat)
         while not ai_ready_event.is_set() and not exit_event.is_set():
             if hasattr(mp, 'parent_process'):
                 parent = mp.parent_process()
@@ -177,7 +202,7 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event
             
             if isinstance(source, str):
                 time.sleep(1/30)
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-exception-caught
         err_msg = f"[Camera Producer Crash]: {repr(e)}"
         print(json.dumps({"type": "error", "message": err_msg}), flush=True)
         sys.stderr.write(err_msg + "\n")
@@ -206,7 +231,6 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
         cooldown = CooldownTracker()
         logger   = CSVLogger()
 
-        # Beri tahu produser bahwa model sudah diload dan siap
         ai_ready_event.set()
 
         interval_start    = datetime.now()
@@ -233,14 +257,14 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
             frame_view = np.ndarray(FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm_in.buf)
             frame_work = frame_view.copy()
 
-            # --- 1. PEOPLE COUNTER ---
+            # 1. PEOPLE COUNTER
             frame_work, active_people, _ = counter.process_frame(frame_work)
             interval_passing = counter.count
             
-            # --- 2. EYE TRACKER ---
+            # 2. EYE TRACKER
             frame_work, faces = tracker.process_frame(frame_work)
 
-            # --- 3. LOGGING COOLDOWN ---
+            # 3. LOGGING COOLDOWN
             watching_now = 0
             for i, face in enumerate(faces):
                 if face["looking"]:
@@ -249,13 +273,13 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
                     if cooldown.check_and_register(face_id):
                         interval_watching += 1
 
-            # --- 4. FLUSH INTERVAL ---
+            # 4. FLUSH INTERVAL
             elapsed = datetime.now() - interval_start
             remaining = timedelta(minutes=INTERVAL_MINUTES) - elapsed
             rem_sec = max(0, int(remaining.total_seconds()))
 
             if elapsed >= timedelta(minutes=INTERVAL_MINUTES):
-                row = logger.log(interval_passing, interval_watching)
+                row = logger.log(interval_start, datetime.now(), interval_passing, interval_watching)
                 result_queue.put({"type": "csv_row", "row": row})
                 
                 counter.reset()
@@ -264,7 +288,7 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
                 interval_watching = 0
                 interval_start = datetime.now()
 
-            # --- 5. TULIS HASIL KE SHM ---
+            # 5. TULIS HASIL KE SHM
             shm_out = known_shms_out[SHM_NAMES_OUT[out_slot_idx]]
             dst_out = np.ndarray(FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm_out.buf)
             np.copyto(dst_out, frame_work)
@@ -272,7 +296,7 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
             with latest_out_idx.get_lock():
                 latest_out_idx.value = out_slot_idx
 
-            # --- 6. KIRIM STATS KE MAIN ---
+            # 6. KIRIM STATS KE MAIN
             result_queue.put({
                 "type": "frame_ready",
                 "active_people": active_people,
@@ -283,14 +307,14 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
             })
             out_slot_idx = (out_slot_idx + 1) % SHM_SLOTS
             
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-exception-caught
         err_msg = f"[AI Worker Crash]: {repr(e)}"
         print(json.dumps({"type": "error", "message": err_msg}), flush=True)
         sys.stderr.write(err_msg + "\n")
         sys.stderr.flush()
     finally:
         if 'logger' in locals():
-            logger.log(interval_passing, interval_watching)
+            logger.log(interval_start, datetime.now(), interval_passing, interval_watching)
         if 'known_shms_in' in locals():
             for shm in known_shms_in.values(): shm.close()
         if 'known_shms_out' in locals():
@@ -318,7 +342,7 @@ def main():
 
     mp.set_start_method('spawn', force=True)
     
-    global exit_event_global
+    global exit_event_global # pylint: disable=global-statement
     exit_event_global = mp.Event() 
     latest_in_idx     = mp.Value('i', 0)     
     latest_out_idx    = mp.Value('i', 0)
@@ -353,8 +377,7 @@ def main():
     ai_process.start()
 
     send({"type": "ready"})
-    
-    # Target fps limiter for sending frames to frontend to avoid overloading IPC
+
     frame_interval = 1.0 / 30.0 
     
     try:
@@ -371,15 +394,13 @@ def main():
                         "people_watching": result["row"]["people_watching"]
                     })
                     continue
-                
-                # Zero-Copy fetching dari AI
+
                 with latest_out_idx.get_lock():
                     out_target_slot = latest_out_idx.value
                 
                 shm_out = shm_blocks_out[out_target_slot]
                 frame_view = np.ndarray(FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm_out.buf)
-                
-                # Kirim ke Electron
+
                 b64 = encode_frame(frame_view.copy())
                 send({"type": "frame", "data": b64})
                 send({
@@ -391,13 +412,11 @@ def main():
                     "flush_in_seconds": result["flush_in_seconds"]
                 })
 
-            # Check if producer died (e.g. video ended)
             if not producer_process.is_alive():
                 send({"type": "done", "message": "Video selesai."})
                 exit_event_global.set()
                 break
 
-            # Frame pacing
             dt = time.time() - t_start
             if dt < frame_interval:
                 time.sleep(frame_interval - dt)

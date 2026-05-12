@@ -9,3 +9,5 @@ setup_env.sh
 build/
 *.spec
 billboard-fe/resources/
+
+ref/
