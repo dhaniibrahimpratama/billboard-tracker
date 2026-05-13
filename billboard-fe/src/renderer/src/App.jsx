@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 
 function App() {
-  const [status, setStatus] = useState('IDLE') // IDLE, RUNNING, ERROR
+  const [status, setStatus] = useState('IDLE')
   const [sourceName, setSourceName] = useState('')
   const [frameData, setFrameData] = useState(null)
   
@@ -14,6 +14,7 @@ function App() {
   })
 
   const [csvLogs, setCsvLogs] = useState([])
+  const [intervalMinutes, setIntervalMinutes] = useState(10) // Default 10 menit
 
   useEffect(() => {
     // Listen to IPC messages from main process
@@ -56,7 +57,7 @@ function App() {
     setSourceName('Kamera (Webcam)')
     setFrameData(null)
     setCsvLogs([])
-    await window.api.startPython(0)
+    await window.api.startPython(0, intervalMinutes)
   }
 
   const handleFileUpload = async (event) => {
@@ -66,7 +67,7 @@ function App() {
       setSourceName(file.name)
       setFrameData(null)
       setCsvLogs([])
-      await window.api.startPython(file.path)
+      await window.api.startPython(file.path, intervalMinutes)
     }
   }
 
@@ -82,8 +83,8 @@ function App() {
     return `${m}:${s}`
   }
 
-  // Calculate percentage (600 seconds = 10 minutes max)
-  const progressPercent = Math.min(100, Math.max(0, (stats.flush_in_seconds / 600) * 100))
+  const totalSeconds = stats.total_interval_seconds || (intervalMinutes * 60)
+  const progressPercent = Math.min(100, Math.max(0, (stats.flush_in_seconds / totalSeconds) * 100))
 
   return (
     <div className="app-container">
@@ -92,6 +93,20 @@ function App() {
           <span>Billboard</span> Eye Tracker
         </div>
         <div className="header-actions">
+          <div className="interval-setting" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#a0aec0', fontSize: '13px' }}>
+            <label htmlFor="intervalInput">Interval CSV (Menit):</label>
+            <input 
+              id="intervalInput"
+              type="number" 
+              min="1" 
+              max="60"
+              value={intervalMinutes}
+              onChange={(e) => setIntervalMinutes(Number(e.target.value))}
+              disabled={status === 'RUNNING'}
+              style={{ width: '50px', background: '#1a202c', border: '1px solid #4a5568', color: '#fff', padding: '4px', borderRadius: '4px' }}
+            />
+          </div>
+          
           <button 
             className="btn btn-webcam" 
             onClick={startWebcam}

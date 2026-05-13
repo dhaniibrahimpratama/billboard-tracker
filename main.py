@@ -216,7 +216,7 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event
 # ==========================================
 # 5. CONSUMER: AI WORKER PROCESS
 # ==========================================
-def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event):
+def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event, interval_minutes):
     interval_passing  = 0
     interval_watching = 0
     try:
@@ -275,10 +275,10 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
 
             # 4. FLUSH INTERVAL
             elapsed = datetime.now() - interval_start
-            remaining = timedelta(minutes=INTERVAL_MINUTES) - elapsed
+            remaining = timedelta(minutes=interval_minutes) - elapsed
             rem_sec = max(0, int(remaining.total_seconds()))
 
-            if elapsed >= timedelta(minutes=INTERVAL_MINUTES):
+            if elapsed >= timedelta(minutes=interval_minutes):
                 row = logger.log(interval_start, datetime.now(), interval_passing, interval_watching)
                 result_queue.put({"type": "csv_row", "row": row})
                 
@@ -303,7 +303,8 @@ def ai_worker_process(exit_event, latest_in_idx, latest_out_idx, frame_ready_eve
                 "people_passing": interval_passing,
                 "watching_now": watching_now,
                 "people_watching": interval_watching,
-                "flush_in_seconds": rem_sec
+                "flush_in_seconds": rem_sec,
+                "total_interval_seconds": int(interval_minutes * 60)
             })
             out_slot_idx = (out_slot_idx + 1) % SHM_SLOTS
             
@@ -331,6 +332,8 @@ def shutdown_handler(signum, frame):
         exit_event_global.set()
 
 def main():
+    global INTERVAL_MINUTES
+    
     if len(sys.argv) > 1:
         arg = sys.argv[1]
         try:
@@ -339,6 +342,12 @@ def main():
             source = arg
     else:
         source = 0
+        
+    if len(sys.argv) > 2:
+        try:
+            INTERVAL_MINUTES = float(sys.argv[2])
+        except ValueError:
+            pass
 
     mp.set_start_method('spawn', force=True)
     
@@ -371,7 +380,7 @@ def main():
     ai_ready_event = mp.Event()
 
     producer_process = mp.Process(target=camera_producer, args=(exit_event_global, latest_in_idx, frame_ready_event, ai_ready_event, source))
-    ai_process       = mp.Process(target=ai_worker_process, args=(exit_event_global, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event))
+    ai_process       = mp.Process(target=ai_worker_process, args=(exit_event_global, latest_in_idx, latest_out_idx, frame_ready_event, result_queue, ai_ready_event, INTERVAL_MINUTES))
     
     producer_process.start()
     ai_process.start()
@@ -409,7 +418,8 @@ def main():
                     "people_passing": result["people_passing"],
                     "watching_now": result["watching_now"],
                     "people_watching": result["people_watching"],
-                    "flush_in_seconds": result["flush_in_seconds"]
+                    "flush_in_seconds": result["flush_in_seconds"],
+                    "total_interval_seconds": result.get("total_interval_seconds", int(INTERVAL_MINUTES * 60))
                 })
 
             if not producer_process.is_alive():

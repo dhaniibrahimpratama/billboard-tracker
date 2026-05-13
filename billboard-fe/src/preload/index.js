@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 
 const api = {
-  startPython: (source) => ipcRenderer.invoke('start-python', source),
+  startPython: (source, interval) => ipcRenderer.invoke('start-python', source, interval),
   stopPython: () => ipcRenderer.invoke('stop-python'),
   onPythonMessage: (callback) => ipcRenderer.on('python-message', (_event, value) => callback(value)),
   removePythonListener: () => ipcRenderer.removeAllListeners('python-message')

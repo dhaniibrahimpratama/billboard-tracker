@@ -40,7 +40,7 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  ipcMain.handle('start-python', (event, source) => {
+  ipcMain.handle('start-python', (event, source, interval) => {
     if (pyProcess) {
       try { pyProcess.kill() } catch (e) {}
       pyProcess = null
@@ -50,14 +50,17 @@ app.whenReady().then(() => {
     let command;
     let args = [];
     
+    // Default interval if not provided
+    const intervalStr = (interval || 10).toString();
+    
     if (app.isPackaged) {
       scriptPath = join(process.resourcesPath, 'billboard_backend', 'billboard_backend.exe')
       command = scriptPath
-      args = [source.toString()]
+      args = [source.toString(), intervalStr]
     } else {
       scriptPath = join(app.getAppPath(), '..', 'main.py')
       command = 'python'
-      args = ['-u', scriptPath, source.toString()]
+      args = ['-u', scriptPath, source.toString(), intervalStr]
     }
 
     console.log(`Starting python backend: ${command} ${args.join(' ')}`);
@@ -70,7 +73,7 @@ app.whenReady().then(() => {
     pyProcess.stdout.on('data', (data) => {
       dataBuffer += data.toString();
       const lines = dataBuffer.split('\n');
-      dataBuffer = lines.pop(); // keep incomplete line
+      dataBuffer = lines.pop();
       lines.forEach(line => {
         if (!line.trim()) return;
         try {
