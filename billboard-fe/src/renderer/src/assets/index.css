@@ -295,3 +295,45 @@ td {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+.interval-setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 0.25rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+.interval-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.interval-input {
+  width: 50px;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  padding: 0.4rem;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.interval-input:focus {
+  border-color: var(--accent-cyan);
+}
+
+.interval-unit {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: 6px;
+}

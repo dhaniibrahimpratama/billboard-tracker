@@ -14,7 +14,12 @@ function App() {
   })
 
   const [csvLogs, setCsvLogs] = useState([])
-  const [intervalMinutes, setIntervalMinutes] = useState(10) // Default 10 menit
+  const [intervalInput, setIntervalInput] = useState('10') // Default 10 menit (disimpan sebagai string agar mudah diketik)
+
+  const getEffectiveInterval = () => {
+    const val = Number(intervalInput)
+    return val > 0 ? val : 10
+  }
 
   useEffect(() => {
     // Listen to IPC messages from main process
@@ -57,7 +62,7 @@ function App() {
     setSourceName('Kamera (Webcam)')
     setFrameData(null)
     setCsvLogs([])
-    await window.api.startPython(0, intervalMinutes)
+    await window.api.startPython(0, getEffectiveInterval())
   }
 
   const handleFileUpload = async (event) => {
@@ -67,7 +72,7 @@ function App() {
       setSourceName(file.name)
       setFrameData(null)
       setCsvLogs([])
-      await window.api.startPython(file.path, intervalMinutes)
+      await window.api.startPython(file.path, getEffectiveInterval())
     }
   }
 
@@ -83,7 +88,21 @@ function App() {
     return `${m}:${s}`
   }
 
-  const totalSeconds = stats.total_interval_seconds || (intervalMinutes * 60)
+  const handleIntervalChange = (e) => {
+    const val = e.target.value
+    if (val === '' || /^\d+$/.test(val)) {
+      const cleanVal = val.replace(/^0+(?=\d)/, '')
+      setIntervalInput(cleanVal)
+    }
+  }
+
+  const handleIntervalBlur = () => {
+    if (intervalInput === '' || Number(intervalInput) < 1) {
+      setIntervalInput('1')
+    }
+  }
+
+  const totalSeconds = stats.total_interval_seconds || (getEffectiveInterval() * 60)
   const progressPercent = Math.min(100, Math.max(0, (stats.flush_in_seconds / totalSeconds) * 100))
 
   return (
@@ -93,18 +112,23 @@ function App() {
           <span>Billboard</span> Eye Tracker
         </div>
         <div className="header-actions">
-          <div className="interval-setting" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#a0aec0', fontSize: '13px' }}>
-            <label htmlFor="intervalInput">Interval CSV (Menit):</label>
-            <input 
-              id="intervalInput"
-              type="number" 
-              min="1" 
-              max="60"
-              value={intervalMinutes}
-              onChange={(e) => setIntervalMinutes(Number(e.target.value))}
-              disabled={status === 'RUNNING'}
-              style={{ width: '50px', background: '#1a202c', border: '1px solid #4a5568', color: '#fff', padding: '4px', borderRadius: '4px' }}
-            />
+          <div className="interval-setting">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <label htmlFor="intervalInput">Interval CSV:</label>
+            <div className="interval-input-wrapper">
+              <input 
+                id="intervalInput"
+                type="number" 
+                min="1" 
+                max="60"
+                value={intervalInput}
+                onChange={handleIntervalChange}
+                onBlur={handleIntervalBlur}
+                disabled={status === 'RUNNING'}
+                className="interval-input"
+              />
+              <span className="interval-unit">mnt</span>
+            </div>
           </div>
           
           <button 
