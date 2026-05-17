@@ -90,6 +90,25 @@ header {
   color: white;
 }
 
+.btn-outline {
+  background-color: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s;
+}
+
+.btn-outline:hover {
+  border-color: var(--text-muted);
+  color: var(--text-main);
+}
+
 input[type="file"] {
   display: none;
 }

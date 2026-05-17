@@ -2,6 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { spawn } from 'child_process'
+import { existsSync, mkdirSync } from 'fs'
 
 let pyProcess = null;
 
@@ -46,6 +47,9 @@ app.whenReady().then(() => {
       outputDir = join(process.resourcesPath, 'billboard_backend', 'output')
     } else {
       outputDir = join(app.getAppPath(), '..', 'output')
+    }
+    if (!existsSync(outputDir)) {
+      mkdirSync(outputDir, { recursive: true })
     }
     shell.openPath(outputDir)
   })

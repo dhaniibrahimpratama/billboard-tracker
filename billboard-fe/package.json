@@ -1,6 +1,9 @@
 {
   "name": "billboard-fe",
   "version": "1.0.0",
+  "description": "Billboard Eye Tracker Application",
+  "author": "Dhani Ibrahim Pratama",
+  "license": "MIT",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -9,15 +12,15 @@
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.2",
-    "@electron-toolkit/utils": "^4.0.0"
+    "@electron-toolkit/utils": "^4.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3",
     "electron-vite": "^2.3.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "vite": "^5.2.0"
   }
 }

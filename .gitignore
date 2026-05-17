@@ -11,3 +11,5 @@ build/
 billboard-fe/resources/
 
 ref/
+.vscode/
+dist/

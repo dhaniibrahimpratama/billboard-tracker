@@ -153,9 +153,8 @@ def camera_producer(exit_event, latest_in_idx, frame_ready_event, ai_ready_event
     else:
         cap = cv2.VideoCapture(source, backend)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        devnull = open(os.devnull, 'w', encoding='utf-8')
-        os.dup2(devnull.fileno(), sys.stderr.fileno())
-
+        with open(os.devnull, 'w', encoding='utf-8') as devnull:
+            os.dup2(devnull.fileno(), sys.stderr.fileno())
     try:
         if not cap.isOpened():
             print(json.dumps({"type": "error", "message": f"Tidak bisa membuka sumber video: {source}"}), flush=True)
