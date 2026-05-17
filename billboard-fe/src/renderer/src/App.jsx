@@ -227,7 +227,27 @@ function App() {
           </div>
 
           <div className="log-section">
-            <div className="section-title">LOG CSV</div>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem'}}>
+              <div className="section-title" style={{margin: 0}}>LOG CSV</div>
+              <button 
+                onClick={() => window.api.openOutputFolder()}
+                style={{
+                  background: 'transparent', 
+                  border: '1px solid var(--border-color)', 
+                  color: 'var(--text-muted)',
+                  fontSize: '0.7rem',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                Buka Folder
+              </button>
+            </div>
             <div className="table-container">
               <table>
                 <thead>

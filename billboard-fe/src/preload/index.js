@@ -4,6 +4,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   startPython: (source, interval) => ipcRenderer.invoke('start-python', source, interval),
   stopPython: () => ipcRenderer.invoke('stop-python'),
+  openOutputFolder: () => ipcRenderer.invoke('open-output-folder'),
   onPythonMessage: (callback) => ipcRenderer.on('python-message', (_event, value) => callback(value)),
   removePythonListener: () => ipcRenderer.removeAllListeners('python-message')
 }

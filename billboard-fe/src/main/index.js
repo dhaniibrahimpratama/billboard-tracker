@@ -40,6 +40,16 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
+  ipcMain.handle('open-output-folder', () => {
+    let outputDir;
+    if (app.isPackaged) {
+      outputDir = join(process.resourcesPath, 'billboard_backend', 'output')
+    } else {
+      outputDir = join(app.getAppPath(), '..', 'output')
+    }
+    shell.openPath(outputDir)
+  })
+
   ipcMain.handle('start-python', (event, source, interval) => {
     if (pyProcess) {
       try { pyProcess.kill() } catch (e) {}
